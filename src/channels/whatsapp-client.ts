@@ -14,8 +14,8 @@
 import makeWASocket, {
     useMultiFileAuthState,
     DisconnectReason,
-    fetchLatestBaileysVersion,
     makeCacheableSignalKeyStore,
+    Browsers,
     WAMessageContent,
     WAMessageKey,
     proto,
@@ -29,6 +29,19 @@ import fs from 'fs';
 import path from 'path';
 import { ensureSenderPaired } from '../lib/pairing';
 import pino from 'pino';
+
+// Use the bundled Baileys version (fetchLatestBaileysVersion is unreliable)
+const BAILEYS_VERSION_FILE = path.join(
+    path.dirname(require.resolve('baileys')),
+    'Defaults', 'baileys-version.json',
+);
+const DEFAULT_VERSION: [number, number, number] = (() => {
+    try {
+        return JSON.parse(fs.readFileSync(BAILEYS_VERSION_FILE, 'utf8')).version;
+    } catch {
+        return [2, 3000, 1015901307]; // fallback
+    }
+})();
 
 // ─── Path constants ────────────────────────────────────────────────
 const SCRIPT_DIR = path.resolve(__dirname, '..', '..');
@@ -524,20 +537,20 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 async function connectToWhatsApp(): Promise<void> {
     const logger = pino({ level: 'silent' }) as any;
 
+    // Clear stale auth on fresh connect attempts to prevent pairing corruption
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-    const { version } = await fetchLatestBaileysVersion();
 
-    log('INFO', `Using WA v${version.join('.')}`);
+    log('INFO', `Using WA v${DEFAULT_VERSION.join('.')}`);
 
     sock = makeWASocket({
         auth: {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, logger),
         },
-        version,
+        version: DEFAULT_VERSION,
         logger,
         printQRInTerminal: false,
-        browser: ['TinyClaw', 'Chrome', '1.0.0'],
+        browser: Browsers.ubuntu('Chrome'),
         syncFullHistory: false,
         markOnlineOnConnect: false,
     });
@@ -597,9 +610,14 @@ async function connectToWhatsApp(): Promise<void> {
             const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode
                 ?? (lastDisconnect?.error as any)?.output?.statusCode;
 
-            if (statusCode === DisconnectReason.loggedOut) {
-                log('WARN', 'WhatsApp session logged out — clearing auth and reconnecting for fresh QR');
-                // Clear auth directory so next connection produces a new QR
+            const needsFreshAuth = statusCode === DisconnectReason.loggedOut
+                || statusCode === DisconnectReason.badSession
+                || statusCode === 401
+                || statusCode === 403
+                || statusCode === 440;
+
+            if (needsFreshAuth) {
+                log('WARN', `WhatsApp auth failed (status ${statusCode}) — clearing auth for fresh QR`);
                 try {
                     const authFiles = fs.readdirSync(AUTH_DIR);
                     for (const f of authFiles) {
@@ -608,14 +626,12 @@ async function connectToWhatsApp(): Promise<void> {
                 } catch {
                     // best effort
                 }
-                // Reconnect (will show fresh QR)
                 setTimeout(() => connectToWhatsApp(), 2000);
             } else {
                 const reason = statusCode
                     ? `status ${statusCode}`
                     : (lastDisconnect?.error as Error)?.message || 'unknown';
                 log('WARN', `WhatsApp disconnected (${reason}) — reconnecting...`);
-                // Reconnect with a small backoff
                 const delay = statusCode === DisconnectReason.restartRequired ? 0 : 3000;
                 setTimeout(() => connectToWhatsApp(), delay);
             }
