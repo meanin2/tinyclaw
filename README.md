@@ -34,13 +34,19 @@
 - ✅ **File-based queue** - No race conditions, reliable message handling
 - ✅ **24/7 operation** - Runs in tmux for always-on availability
 
+## Community 
+
+[Discord](https://discord.com/invite/jH6AcEChuD)
+
+We are actively looking for contributors. Please reach out.
+
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- macOS or Linux
-- Node.js v14+
-- tmux
+- macOS, Linux and Windows (WSL2)
+- Node.js v18+
+- tmux, jq
 - Bash 4.0+ (macOS: `brew install bash`)
 - [Claude Code CLI](https://claude.com/claude-code) (for Anthropic provider)
 - [Codex CLI](https://docs.openai.com/codex) (for OpenAI provider)
